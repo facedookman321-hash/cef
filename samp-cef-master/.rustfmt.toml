@@ -1,4 +1,0 @@
-fn_params_layout = "Compressed"
-edition = "2018"
-use_field_init_shorthand = true
-newline_style = "Unix"
