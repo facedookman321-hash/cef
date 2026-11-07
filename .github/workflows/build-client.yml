@@ -1,0 +1,104 @@
+name: build-client
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: nightly-2021-10-04
+  CEF_NAME: cef_binary_89.0.5+gc1f90d8+chromium-89.0.4389.40_windows32
+
+jobs:
+  build_client:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configuration
+        shell: bash
+        run: |
+          echo "DX_SDK_DIR=$RUNNER_TEMP/dxsdk" >> "$GITHUB_ENV"
+          echo "DX_SDK=$RUNNER_TEMP/dxsdk/Lib/x86" >> "$GITHUB_ENV"
+          echo "CEF_ROOT=$RUNNER_TEMP/cef" >> "$GITHUB_ENV"
+
+      - name: DirectX SDK cache
+        id: dx-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DX_SDK_DIR }}
+          key: directx-jun2010
+
+      - name: CEF cache
+        id: cef-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CEF_ROOT }}
+          key: cef-89.0.5-windows32
+
+      - name: Install DirectX SDK
+        if: steps.dx-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          curl -fL https://download.microsoft.com/download/a/e/7/ae743f1f-632b-4809-87a9-aa1bb3458e31/DXSDK_Jun10.exe -o _DX2010_.exe
+          7z x _DX2010_.exe DXSDK/Lib/x86 -o_DX2010_
+          mv _DX2010_/DXSDK "$DX_SDK_DIR"
+          rm -fR _DX*_ _DX*_.exe
+
+      - name: Download CEF 89
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p "$CEF_ROOT"
+          curl -fL "https://cef-builds.spotifycdn.com/${CEF_NAME//+/%2B}.tar.bz2" -o cef.tar.bz2
+          tar -xjf cef.tar.bz2 -C "$CEF_ROOT" --strip-components=1
+          ls "$CEF_ROOT/Release"
+
+      - name: Install ${{ env.RUST_TOOLCHAIN }} + i686 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: i686-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-old-${{ hashFiles('**/Cargo.toml') }}
+
+      - name: Build client (i686)
+        shell: bash
+        run: |
+          export CEF_PATH="$CEF_ROOT/Release"
+          cargo build --release --target i686-pc-windows-msvc -p client -p renderer -p loader
+
+      - name: Make a package
+        shell: bash
+        run: |
+          T=target/i686-pc-windows-msvc/release
+          mkdir -p redist/cef
+          cp "$T/loader.dll" redist/cef.asi
+          cp "$T/client.dll" "$T/renderer.exe" redist/cef/
+          cp -r "$CEF_ROOT"/Release/* redist/cef/
+          cp -r "$CEF_ROOT"/Resources/* redist/cef/
+          rm -f redist/cef/*.lib
+          cd redist
+          7z a -tzip cef.zip cef.asi cef
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cef.zip
+          path: redist/cef.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cef-binaries
+          path: |
+            target/i686-pc-windows-msvc/release/client.dll
+            target/i686-pc-windows-msvc/release/renderer.exe
+            target/i686-pc-windows-msvc/release/loader.dll

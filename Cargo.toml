@@ -6,9 +6,6 @@ members = [
     "client",
     "renderer",
     "messages",
-    "server",
-    "cef-api",
-    "cef-interface",
     "network",
 ]
 
